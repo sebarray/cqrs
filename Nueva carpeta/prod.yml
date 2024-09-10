@@ -1,0 +1,90 @@
+name: Build and Push to ECR on Merge develop
+
+on:
+  push:
+    branches:
+      - develop
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Create AWS directory
+      run: mkdir -p ~/.aws
+
+    - name: Configure AWS credentials
+      run: |
+        echo "[default]
+        aws_access_key_id=${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws_secret_access_key=${{ secrets.AWS_SECRET_ACCESS_KEY }}" > ~/.aws/credentials
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        AWS_DEFAULT_REGION: us-east-2 
+
+    - name: Set up environment
+      env:
+        PORT: ${{ secrets.PORT }}
+        API_KEY: ${{ secrets.API_KEY }} 
+       
+      run: |
+     
+
+        echo "PORT=${PORT}" > .env
+        echo "API_KEY=${API_KEY}" >> .env
+       
+       
+
+    - name: Login to Amazon ECR
+      run: |
+        aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin ${{ secrets.URL_AWS }}
+       
+      env:
+        URL_AWS: ${{ secrets.URL_AWS }}
+
+    - name: Limpiar imágenes antiguas en ECR
+      run: |
+        # Nombre del repositorio en ECR
+        ECR_REPO_NAME="openapi"
+        # Tag a eliminar (en este caso, "dev")
+        TAG_TO_DELETE="dev" 
+        
+        # Obtener la lista de números de secuencia de las imágenes con el tag a eliminar
+        IMAGE_SEQS=$(aws ecr describe-images --repository-name $ECR_REPO_NAME --filter "tagStatus=TAGGED" --query "imageDetails[?imageTags==['$TAG_TO_DELETE']].imageDigest" --output json | jq -r '.[]')
+        
+        # Eliminar las imágenes antiguas con el tag "dev"
+        for imageSeq in $IMAGE_SEQS; do
+          aws ecr batch-delete-image --repository-name $ECR_REPO_NAME --image-ids imageDigest=$imageSeq
+        done
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        AWS_DEFAULT_REGION: us-east-2
+        AWS_PAGER: "" # Esto desactiva el paginado para evitar problemas de formato de salida
+    
+    - name: Construir y actualizar la imagen en ECR
+      run: |
+        URL_AWS=${{ secrets.URL_AWS }}
+        ECR_IMAGE="prueba"
+        ECR_TAG="prod"
+        # Construir la imagen de Docker
+        docker build -t pigside .
+    
+        # Etiquetar la imagen con la URL del repositorio ECR y la etiqueta existente
+        docker tag pigside:prod 966424126833.dkr.ecr.us-east-2.amazonaws.com/pigside:latest        
+    
+        # Subir la imagen actualizada a ECR
+        docker push 966424126833.dkr.ecr.us-east-2.amazonaws.com/pigside:prod      
+    
+        echo "Imagen actualizada exitosamente."
+       
+      env:
+        URL_AWS: ${{ secrets.URL_AWS }}
+
+  
